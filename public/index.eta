@@ -26,10 +26,15 @@
                     <% } else if (item.type === 'check') { %>
                         <div class="check <%= item.status %>">
                             <div class="timestamp"><%= item.timestamp %></div>
-                            <strong>Status:</strong> <%= item.status === 'changed' ? 'Changed' : 'No Change' %><br>
-                            <img src="<%= item.screenshotPath %>" alt="Screenshot">
-                            <% if (item.diffPath) { %>
-                                <img src="<%= item.diffPath %>" alt="Diff">
+                            <% if (item.status === 'failed') { %>
+                                <strong>Status:</strong> Failed<br>
+                                <strong>Error:</strong> <%= item.errorMessage %>
+                            <% } else { %>
+                                <strong>Status:</strong> <%= item.status === 'changed' ? 'Changed' : 'No Change' %><br>
+                                <img src="<%= item.screenshotPath %>" alt="Screenshot">
+                                <% if (item.diffPath) { %>
+                                    <img src="<%= item.diffPath %>" alt="Diff">
+                                <% } %>
                             <% } %>
                         </div>
                     <% } %>

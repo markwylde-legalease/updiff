@@ -45,11 +45,17 @@ async function ensureDirectoryExists(dir) {
 async function takeScreenshot(url) {
   const browser = await playwright.chromium.launch();
   const page = await browser.newPage();
-  await page.goto(url);
-  await new Promise(resolve => setTimeout(resolve, 5000));
-  const screenshot = await page.screenshot({ fullPage: true });
-  await browser.close();
-  return screenshot;
+  try {
+    await page.goto(url, { timeout: 30000 }); // 30 seconds timeout
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    const screenshot = await page.screenshot({ fullPage: true });
+    await browser.close();
+    return { success: true, screenshot };
+  } catch (error) {
+    console.error(`Failed to take screenshot for ${url}:`, error);
+    await browser.close();
+    return { success: false, error: error.message };
+  }
 }
 
 async function compareImages(img1, img2) {
@@ -79,27 +85,33 @@ async function performCheck(url) {
   const currentTime = new Date();
   const filename = `screenshot_${url.replace(/[^a-zA-Z0-9]/g, '_')}_${currentTime.toISOString().replace(/[:.]/g, '-')}.png`;
 
-  const newScreenshot = await takeScreenshot(url);
+  const screenshotResult = await takeScreenshot(url);
 
   let checkResult = {
     time: currentTime,
     wasDifferent: false,
     filePath: '',
-    diffFilePath: null
+    diffFilePath: null,
+    failed: !screenshotResult.success,
+    errorMessage: screenshotResult.error
   };
 
-  if (lastScreenshots[url]) {
-    const { isDifferent, diffImage } = await compareImages(lastScreenshots[url], newScreenshot);
+  if (screenshotResult.success) {
+    if (lastScreenshots[url]) {
+      const { isDifferent, diffImage } = await compareImages(lastScreenshots[url], screenshotResult.screenshot);
 
-    if (isDifferent) {
-      checkResult.wasDifferent = true;
-      checkResult.filePath = await saveImage(newScreenshot, SCREENSHOT_DIR, filename);
-      checkResult.diffFilePath = await saveImage(diffImage, DIFF_DIR, `diff_${filename}`);
+      if (isDifferent) {
+        checkResult.wasDifferent = true;
+        checkResult.filePath = await saveImage(screenshotResult.screenshot, SCREENSHOT_DIR, filename);
+        checkResult.diffFilePath = await saveImage(diffImage, DIFF_DIR, `diff_${filename}`);
+      } else {
+        checkResult.filePath = checks[url][checks[url].length - 1].filePath;
+      }
     } else {
-      checkResult.filePath = checks[url][checks[url].length - 1].filePath;
+      checkResult.filePath = await saveImage(screenshotResult.screenshot, SCREENSHOT_DIR, filename);
     }
-  } else {
-    checkResult.filePath = await saveImage(newScreenshot, SCREENSHOT_DIR, filename);
+
+    lastScreenshots[url] = screenshotResult.screenshot;
   }
 
   if (!checks[url]) {
@@ -107,8 +119,6 @@ async function performCheck(url) {
   }
   checks[url].push(checkResult);
   console.log('Check completed for', url, ':', checkResult);
-
-  lastScreenshots[url] = newScreenshot;
 
   // Save state after each check
   await saveState();
@@ -130,7 +140,9 @@ async function loadState() {
     const state = JSON.parse(stateData);
     checks = state.checks;
     for (const [url, screenshotPath] of Object.entries(state.lastScreenshotPaths)) {
-      lastScreenshots[url] = await fs.readFile(path.join(__dirname, '../public', screenshotPath));
+      if (screenshotPath) {
+        lastScreenshots[url] = await fs.readFile(path.join(__dirname, '../public', screenshotPath));
+      }
     }
     console.log('Resumed from previous state');
   } catch (error) {
@@ -167,7 +179,7 @@ async function setupServer() {
           });
         }
 
-        if (check.wasDifferent || i === 0 || i === urlChecks.length - 1) {
+        if (check.wasDifferent || check.failed || i === 0 || i === urlChecks.length - 1) {
           // If there were unchanged checks before this, add a rollup
           if (unchangedCount > 2) {
             timelineItems.push(unchangedBuffer[0]); // Add the first unchanged check
@@ -182,13 +194,14 @@ async function setupServer() {
             timelineItems.push(...unchangedBuffer);
           }
 
-          // Add the changed check
+          // Add the changed or failed check
           timelineItems.push({
             type: 'check',
-            status: check.wasDifferent ? 'changed' : 'unchanged',
+            status: check.failed ? 'failed' : (check.wasDifferent ? 'changed' : 'unchanged'),
             timestamp: checkTime.format('MMM D, HH:mm'),
             screenshotPath: check.filePath,
-            diffPath: check.diffFilePath
+            diffPath: check.diffFilePath,
+            errorMessage: check.errorMessage
           });
 
           unchangedCount = 0;
