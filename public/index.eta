@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uptime Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <h1>Uptime Dashboard</h1>
+    <% it.sites.forEach(function(site) { %>
+        <h2><%= site.url %></h2>
+        <div class="timeline-container">
+            <div class="timeline">
+                <% site.timeTicks.forEach(function(tick) { %>
+                    <div class="time-tick" style="right: <%= tick.position %>px;">
+                        <%= tick.time %>
+                    </div>
+                <% }) %>
+
+                <% site.timelineItems.forEach(function(item) { %>
+                    <% if (item.type === 'rollup') { %>
+                        <div class="rollup">
+                            <%= item.count %> unchanged<br>over <%= item.duration %>
+                        </div>
+                    <% } else if (item.type === 'check') { %>
+                        <div class="check <%= item.status %>">
+                            <div class="timestamp"><%= item.timestamp %></div>
+                            <strong>Status:</strong> <%= item.status === 'changed' ? 'Changed' : 'No Change' %><br>
+                            <img src="<%= item.screenshotPath %>" alt="Screenshot">
+                            <% if (item.diffPath) { %>
+                                <img src="<%= item.diffPath %>" alt="Diff">
+                            <% } %>
+                        </div>
+                    <% } %>
+                <% }) %>
+            </div>
+        </div>
+    <% }) %>
+</body>
+</html>

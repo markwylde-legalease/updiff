@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World with Shapes and Colors</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+        }
+        .shapes {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .shape {
+            width: 100px;
+            height: 100px;
+            margin: 0 10px;
+            transition: transform 0.3s ease;
+        }
+        .shape:hover {
+            transform: scale(1.1);
+        }
+        .circle {
+            background-color: #ff6b6b;
+            border-radius: 50%;
+        }
+        .square {
+            background-color: #4ecdc4;
+        }
+        .triangle {
+            width: 0;
+            height: 0;
+            border-left: 50px solid transparent;
+            border-right: 50px solid transparent;
+            border-bottom: 100px solid #feca57;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello, World!</h1>
+        <div class="shapes">
+            <div class="shape circle"></div>
+            <div class="shape square"></div>
+            <div class="shape triangle"></div>
+        </div>
+    </div>
+</body>
+</html>
