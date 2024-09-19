@@ -33,6 +33,7 @@ const eta = new Eta({ views: path.join(__dirname, "../public") });
 
 let checks = {};
 let lastScreenshots = {};
+let browser;
 
 async function ensureDirectoryExists(dir) {
   try {
@@ -43,17 +44,16 @@ async function ensureDirectoryExists(dir) {
 }
 
 async function takeScreenshot(url) {
-  const browser = await playwright.chromium.launch();
   const page = await browser.newPage();
   try {
     await page.goto(url, { timeout: 30000 }); // 30 seconds timeout
     await new Promise(resolve => setTimeout(resolve, 5000));
     const screenshot = await page.screenshot({ fullPage: true });
-    await browser.close();
+    await page.close();
     return { success: true, screenshot };
   } catch (error) {
     console.error(`Failed to take screenshot for ${url}:`, error);
-    await browser.close();
+    await page.close();
     return { success: false, error: error.message };
   }
 }
@@ -243,6 +243,9 @@ async function main() {
   // Load previous state if it exists
   await loadState();
 
+  // Launch a single browser instance
+  browser = await playwright.chromium.launch();
+
   // Setup the HTTP server
   await setupServer();
 
@@ -258,5 +261,14 @@ async function main() {
     }
   }, INTERVAL);
 }
+
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down...');
+  if (browser) {
+    await browser.close();
+  }
+  process.exit(0);
+});
 
 main().catch(console.error);
