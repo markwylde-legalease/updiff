@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import moment from 'moment';
 import { Eta } from "eta";
+import sendNotification from './sendNotification';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,26 +15,35 @@ const __dirname = path.dirname(__filename);
 const SCREENSHOT_DIR = path.join(__dirname, '../public', 'screenshots');
 const DIFF_DIR = path.join(__dirname, '../public', 'screenshots');
 const STATE_FILE = path.join(__dirname, '../state.json');
-const INTERVAL = 10000;
 const PORT = 3000;
+const BATCH_SIZE = 4;
+const LOOP_DELAY = 10000; // 10 seconds
 
 const URLS = [
   'https://www.legal500.com/',
   'https://www.legal500.com/rankings',
   'https://www.legal500.com/c/north',
-  'https://www.legal500.com/c/north',
+  'https://www.legal500.com/c/london',
   'https://www.legal500.com/c/north/corporate-and-commercial/corporate-and-commercial-newcastle',
   'https://www.legal500.com/rankings/ranking/c-north/corporate-and-commercial/corporate-and-commercial-newcastle/3465-ward-hadaway-llp',
   'https://www.legal500.com/firms/3465-ward-hadaway-llp/c-north/rankings',
-  'https://www.legal500.com/firms/3465-ward-hadaway-llp/c-north/lawyers',
-  'http://localhost:8003/test.html'
+  'https://www.legal500.com/firms/3465-ward-hadaway-llp/c-north/lawyers'
 ];
 
-const eta = new Eta({ views: path.join(__dirname, "../public") });
+const eta = new Eta({
+  views: path.join(__dirname, "../public")
+});
 
 let checks = {};
 let lastScreenshots = {};
-let browser;
+let browser: playwright.Browser;
+
+setTimeout(() => {
+  sendNotification({
+    message: 'Change detection started',
+    title: 'Change Detection',
+  });
+}, 2000);
 
 async function ensureDirectoryExists(dir) {
   try {
@@ -45,6 +55,16 @@ async function ensureDirectoryExists(dir) {
 
 async function takeScreenshot(url) {
   const page = await browser.newPage();
+
+  for (const context of browser.contexts()) {
+    context.addCookies([{
+      name: 'cookieyes-consent',
+      value: 'consentid:M2RBd1dzT2xmenFUVmRGVW5aNTVvWFNXREdVbFpGdzg,consent:no,action:yes,necessary:yes,functional:no,analytics:no,performance:no,advertisement:no,other:no,lastRenewedDate:1707128849000',
+      domain: new URL(url).hostname,
+      path: '/',
+    }]);
+  }
+
   try {
     await page.goto(url, { timeout: 30000 }); // 30 seconds timeout
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -66,12 +86,20 @@ async function compareImages(img1, img2) {
 
   const { width, height } = image1;
   const diff = new PNG({ width, height });
-  const numDiffPixels = pixelmatch(image1.data, image2.data, diff.data, width, height, { threshold: 0.1 });
+  try {
+    const numDiffPixels = pixelmatch(image1.data, image2.data, diff.data, width, height, { threshold: 0.1 });
 
-  return {
-    isDifferent: numDiffPixels > 0,
-    diffImage: PNG.sync.write(diff)
-  };
+    return {
+      isDifferent: numDiffPixels > 0,
+      diffImage: PNG.sync.write(diff)
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      isDifferent: true,
+      diffImage: null
+    }
+  }
 }
 
 async function saveImage(image, directory, filename) {
@@ -103,7 +131,12 @@ async function performCheck(url) {
       if (isDifferent) {
         checkResult.wasDifferent = true;
         checkResult.filePath = await saveImage(screenshotResult.screenshot, SCREENSHOT_DIR, filename);
-        checkResult.diffFilePath = await saveImage(diffImage, DIFF_DIR, `diff_${filename}`);
+        checkResult.diffFilePath = diffImage && await saveImage(diffImage, DIFF_DIR, `diff_${filename}`);
+
+        sendNotification({
+          title: 'Change Detected',
+          message: `A change was detected on ${url}`
+        });
       } else {
         checkResult.filePath = checks[url][checks[url].length - 1].filePath;
       }
@@ -112,6 +145,18 @@ async function performCheck(url) {
     }
 
     lastScreenshots[url] = screenshotResult.screenshot;
+  } else {
+    // If the check failed (e.g., due to timeout), find the last working screenshot
+    const lastWorkingCheck = [...checks[url]].reverse().find(check => !check.failed);
+    if (lastWorkingCheck) {
+      checkResult.filePath = lastWorkingCheck.filePath;
+    }
+
+    // Send a Mac notification for check failure
+    sendNotification({
+      title: 'Check Failed',
+      message: `Failed to check ${url}: ${checkResult.errorMessage}`
+    });
   }
 
   if (!checks[url]) {
@@ -166,6 +211,7 @@ async function setupServer() {
       let lastTime = null;
       let unchangedCount = 0;
       let unchangedBuffer = [];
+      let lastChange = null;
 
       for (let i = urlChecks.length - 1; i >= 0; i--) {
         const check = urlChecks[i];
@@ -198,11 +244,16 @@ async function setupServer() {
           timelineItems.push({
             type: 'check',
             status: check.failed ? 'failed' : (check.wasDifferent ? 'changed' : 'unchanged'),
-            timestamp: checkTime.format('MMM D, HH:mm'),
+            timestamp: checkTime,
             screenshotPath: check.filePath,
             diffPath: check.diffFilePath,
             errorMessage: check.errorMessage
           });
+
+          // Update lastChange if this check was different
+          if (check.wasDifferent) {
+            lastChange = checkTime;
+          }
 
           unchangedCount = 0;
           unchangedBuffer = [];
@@ -212,7 +263,7 @@ async function setupServer() {
           unchangedBuffer.push({
             type: 'check',
             status: 'unchanged',
-            timestamp: checkTime.format('MMM D, HH:mm'),
+            timestamp: checkTime,
             screenshotPath: check.filePath
           });
         }
@@ -220,18 +271,24 @@ async function setupServer() {
 
       return {
         url,
+        lastChange: lastChange ? lastChange.toDate() : new Date(0), // Use Date object instead of formatted string
         timelineItems,
         timeTicks
       };
     });
 
-    const html = await eta.render("./index", { sites });
+    const html = await eta.render("./index", { sites, moment });
     res.send(html);
   });
 
   app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
+}
+
+async function processUrlBatch(urlBatch) {
+  const promises = urlBatch.map(url => performCheck(url));
+  await Promise.all(promises);
 }
 
 async function main() {
@@ -249,17 +306,15 @@ async function main() {
   // Setup the HTTP server
   await setupServer();
 
-  // Perform initial checks
-  for (const url of URLS) {
-    await performCheck(url);
-  }
-
-  // Schedule subsequent checks
-  setInterval(async () => {
-    for (const url of URLS) {
-      await performCheck(url);
+  while (true) {
+    for (let i = 0; i < URLS.length; i += BATCH_SIZE) {
+      const urlBatch = URLS.slice(i, i + BATCH_SIZE);
+      await processUrlBatch(urlBatch);
     }
-  }, INTERVAL);
+
+    console.log(`Completed a full check cycle. Waiting for ${LOOP_DELAY / 1000} seconds before the next cycle.`);
+    await new Promise(resolve => setTimeout(resolve, LOOP_DELAY));
+  }
 }
 
 // Handle graceful shutdown

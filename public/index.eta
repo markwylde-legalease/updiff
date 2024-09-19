@@ -4,43 +4,108 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Uptime Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <h1>Uptime Dashboard</h1>
-    <% it.sites.forEach(function(site) { %>
-        <h2><%= site.url %></h2>
-        <div class="timeline-container">
-            <div class="timeline">
-                <% site.timeTicks.forEach(function(tick) { %>
-                    <div class="time-tick" style="right: <%= tick.position %>px;">
-                        <%= tick.time %>
-                    </div>
-                <% }) %>
+    <header>
+        <h1>Uptime Dashboard</h1>
+    </header>
+    <main>
+    <table class="site-table"><table class="site-table">
+    <tr>
+        <th>URL</th>
+        <th>Last Change</th>
+        <th>Last Check</th>
+    </tr>
+    <% it.sites.forEach(function(site) {
+        const lastCheck = site.timelineItems[0];
+        let timeSinceLastCheck = -1;
+        let statusClass = 'status-red';
+        if (lastCheck && lastCheck.timestamp) {
+            timeSinceLastCheck = it.moment().diff(lastCheck.timestamp, 'minutes');
+            if (timeSinceLastCheck <= 2) {
+                statusClass = 'status-green';
+            } else if (timeSinceLastCheck <= 5) {
+                statusClass = 'status-yellow';
+            }
+        }
 
-                <% site.timelineItems.forEach(function(item) { %>
-                    <% if (item.type === 'rollup') { %>
-                        <div class="rollup">
-                            <%= item.count %> unchanged<br>over <%= item.duration %>
-                        </div>
-                    <% } else if (item.type === 'check') { %>
-                        <div class="check <%= item.status %>">
-                            <div class="timestamp"><%= item.timestamp %></div>
-                            <% if (item.status === 'failed') { %>
-                                <strong>Status:</strong> Failed<br>
-                                <strong>Error:</strong> <%= item.errorMessage %>
-                            <% } else { %>
-                                <strong>Status:</strong> <%= item.status === 'changed' ? 'Changed' : 'No Change' %><br>
-                                <img src="<%= item.screenshotPath %>" alt="Screenshot">
-                                <% if (item.diffPath) { %>
-                                    <img src="<%= item.diffPath %>" alt="Diff">
-                                <% } %>
-                            <% } %>
-                        </div>
-                    <% } %>
-                <% }) %>
-            </div>
-        </div>
+        // Find the most recent change
+        const lastChange = site.timelineItems.find(item => item.status === 'changed');
+    %>
+        <tr>
+            <td><%= site.url %></td>
+            <td><%= lastChange ? it.moment(lastChange.timestamp).fromNow() : 'Never' %></td>
+            <td>
+                <span class="status-circle <%= statusClass %>"></span>
+                <%= lastCheck && lastCheck.timestamp ? it.moment(lastCheck.timestamp).fromNow() : 'N/A' %>
+            </td>
+        </tr>
     <% }) %>
+</table>
+        <% it.sites.forEach(function(site) { %>
+            <section class="site-section">
+                <h2><%= site.url %></h2>
+                <div class="timeline-container">
+                    <div class="timeline">
+                        <% site.timeTicks.forEach(function(tick) { %>
+                            <div class="time-tick" style="right: <%= tick.position %>px;">
+                                <%= tick.time %>
+                            </div>
+                        <% }) %>
+
+                        <% site.timelineItems.forEach(function(item) { %>
+                            <% if (item.type === 'rollup') { %>
+                                <div class="rollup">
+                                    <span class="rollup-count"><%= item.count %></span>
+                                    <span class="rollup-text">unchanged<br>over <%= item.duration %></span>
+                                </div>
+                            <% } else if (item.type === 'check') { %>
+                                <div class="check <%= item.status %>" <% if (item.diffPath) { %> onclick="showDiff('<%= item.diffPath %>')" <% } %>>
+                                    <div class="timestamp"><%= item.timestamp ? item.timestamp.format('MMM D, HH:mm:ss') : 'N/A' %></div>
+                                    <% if (item.status === 'failed') { %>
+                                        <div class="status failed">Failed</div>
+                                        <div class="error-message"><%= item.errorMessage %></div>
+                                    <% } else { %>
+                                        <div class="status <%= item.status %>"><%= item.status === 'changed' ? 'Changed' : 'No Change' %></div>
+                                        <img src="<%= item.screenshotPath %>" alt="Screenshot" class="screenshot">
+                                    <% } %>
+                                </div>
+                            <% } %>
+                        <% }) %>
+                    </div>
+                </div>
+            </section>
+        <% }) %>
+    </main>
+
+    <div id="diffModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <img id="diffImage" src="" alt="Diff Image" style="width:100%">
+        </div>
+    </div>
+
+    <script>
+        var modal = document.getElementById("diffModal");
+        var span = document.getElementsByClassName("close")[0];
+        var diffImage = document.getElementById("diffImage");
+
+        function showDiff(diffPath) {
+            modal.style.display = "block";
+            diffImage.src = diffPath;
+        }
+
+        span.onclick = function() {
+            modal.style.display = "none";
+        }
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+    </script>
 </body>
 </html>
